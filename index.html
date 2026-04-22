@@ -1034,6 +1034,7 @@ input:focus,select:focus,textarea:focus{
 <button class="btn btn-d btn-sm" onclick="delProg()">🗑️ حذف التقدم</button>
 <button class="btn btn-d btn-sm" onclick="resetAll()">⚠️ إعادة ضبط</button>
 </div>
+<button class="btn btn-sec btn-full" onclick="repairDataNow()" style="margin-top:var(--sp3)">🛠️ إصلاح البيانات الآن</button>
 </div>
 <!-- IMPORT PANEL -->
 <div id="ep-import" style="display:none">
@@ -1386,13 +1387,18 @@ input:focus,select:focus,textarea:focus{
 </div>
 </div>
 </div>
+<script src="./js/storage.js"></script>
+<script src="./js/programs.js"></script>
+<script src="./js/exercises.js"></script>
+<script src="./js/sessions.js"></script>
+<script src="./js/ui.js"></script>
 <script>
 // ════════════════════════════════════════
 // DATA STORE — localStorage (works on Android/real browser)
 // ════════════════════════════════════════
-const LS='gyt_';
-const save=(k,v)=>{try{localStorage.setItem(LS+k,JSON.stringify(v))}catch(e){}};
-const load=(k,d)=>{try{const v=localStorage.getItem(LS+k);return v?JSON.parse(v):d}catch(e){return d}};
+const LS=window.AppStorage?.prefix||'gyt_';
+const save=(k,v)=>window.AppStorage?window.AppStorage.save(k,v):(()=>{try{localStorage.setItem(LS+k,JSON.stringify(v))}catch(e){}})();
+const load=(k,d)=>window.AppStorage?window.AppStorage.load(k,d):(()=>{try{const v=localStorage.getItem(LS+k);return v?JSON.parse(v):d}catch(e){return d}})();
 
 let exercises=load('ex',[]);
 let program=load('prog',[]);
@@ -1417,6 +1423,7 @@ const LANG_DICT = {
     rest_day:'يوم راحة',search:'🔍 ابحث عن تمرين...',
     no_exercises:'لا توجد تمارين',add_first:'أضف أول تمرين لك',
     no_sessions:'لا توجد جلسات',start_first:'ابدأ أول جلسة رياضية',
+    add_more_first:'أضف المزيد من التمارين أولاً',
     lang_label:'اللغة',lang_en:'English',
     good_morning:'صباح الخير',good_afternoon:'مساء الخير',good_evening:'مساء النور',
     week_sessions:'جلسات هذا الأسبوع',total_sessions:'إجمالي الجلسات',
@@ -1428,6 +1435,7 @@ const LANG_DICT = {
     rest_day:'Rest Day',search:'🔍 Search exercise...',
     no_exercises:'No exercises',add_first:'Add your first exercise',
     no_sessions:'No sessions yet',start_first:'Start your first gym session',
+    add_more_first:'Add more exercises first',
     lang_label:'Language',lang_en:'English',
     good_morning:'Good Morning',good_afternoon:'Good Afternoon',good_evening:'Good Evening',
     week_sessions:'This Week',total_sessions:'Total Sessions',
@@ -1480,6 +1488,32 @@ let cfg=load('cfg',{dark:true,fs:16,restAuto:true,restSecs:90,unit:'kg',sound:tr
 let profile=load('profile',{name:'',age:30,height:170,weight:73});
 let weightLog=load('weightLog',[]);
 let lastDay=load('lastday','');
+
+function normalizeLoadedState(){
+  const before=JSON.stringify({exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId});
+  const safe=sanitizeImportPayload({
+    exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId
+  });
+  exercises=safe.exercises||[];
+  program=safe.program||[];
+  programs=safe.programs||programs||[];
+  sessions=safe.sessions||[];
+  weightLog=safe.weightLog||[];
+  profile=safe.profile||{name:'',age:30,height:170,weight:73,goal:0};
+  cfg=Object.assign({dark:true,fs:16,restAuto:true,restSecs:90,unit:'kg',sound:true,vib:true,wakelock:false,lang:'ar'},safe.cfg||{});
+  lastDay=safe.lastDay||'';
+  activeProgramId=safe.activeProgramId||activeProgramId||'';
+  save('ex',exercises);save('prog',program);save('programs',programs);save('sess',sessions);
+  save('weightLog',weightLog);save('profile',profile);save('cfg',cfg);save('lastday',lastDay);save('activeProg',activeProgramId);
+  const after=JSON.stringify({exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId});
+  return before!==after;
+}
+function repairDataNow(){
+  const changed=normalizeLoadedState();
+  syncProgram();
+  renderHome();renderEx();renderProg();renderProg2();initSettings();
+  toast(changed?'تم إصلاح البيانات وحفظها ✓':'البيانات سليمة ✓',changed?'i':'s');
+}
 
 // ── DEFAULT EXERCISES
 const DEF_EX=[
@@ -1732,7 +1766,7 @@ function vibr(ms=40){if(cfg.vib&&navigator.vibrate)navigator.vibrate(ms);}
 // ════════════════════════════════════════
 function renderHome(){
   const h=new Date().getHours();
-  document.getElementById('h-greet').textContent=h<12?'Good Morning ☀️':h<17?'Good Afternoon ⛅':'Good Evening 🌙';
+  document.getElementById('h-greet').textContent=h<12?T('good_morning'):h<17?T('good_afternoon'):T('good_evening');
   // Day grid
   document.getElementById('day-grid').innerHTML=program.map(d=>{
     const isLast=lastDay===d.id;
@@ -1773,10 +1807,19 @@ function renderHome(){
 // EXERCISE LIBRARY
 // ════════════════════════════════════════
 let exFilter='All';
+function setExFilter(v){
+  const apply=nv=>{exFilter=nv;renderEx();};
+  if(window.ExercisesModule?.setFilter)return window.ExercisesModule.setFilter(v,apply);
+  apply(v);
+}
+function exOptions(selectedId=''){
+  if(typeof window!=='undefined'&&window.ExercisesModule?.formatOptions)return window.ExercisesModule.formatOptions(exercises,selectedId,esc);
+  return exercises.map(e=>'<option value="'+esc(e.id)+'"'+(e.id===selectedId?' selected':'')+'>'+esc(e.name)+'</option>').join('');
+}
 function renderEx(){
   const cats=['All',...new Set(exercises.map(e=>e.cat))];
   document.getElementById('ex-fbar').innerHTML=cats.map(c=>
-    '<button class="fbtn'+(exFilter===c?' active':'')+'" onclick="exFilter=\''+c+'\';renderEx()">'+c+'</button>'
+    '<button class="fbtn'+(exFilter===c?' active':'')+'" data-f="'+esc(c)+'" onclick="setExFilter(this.dataset.f)">'+esc(c)+'</button>'
   ).join('');
   const _q=(document.getElementById('ex-search')?.value||'').toLowerCase().trim();
   const filtered=(exFilter==='All'?exercises:exercises.filter(e=>e.cat===exFilter)).filter(e=>!_q||e.name.toLowerCase().includes(_q)||e.cat.toLowerCase().includes(_q));
@@ -1791,12 +1834,12 @@ function exCard(e){
     '<div class="ex-ico">'+(e.icon||'💪')+'</div>'+
     '<div style="flex:1">'+
     '<div class="ex-name">'+esc(e.name)+'</div>'+
-    '<div class="ex-cat">'+e.cat+' · '+e.sets+'×'+e.reps+'</div>'+
+    '<div class="ex-cat">'+esc(e.cat)+' · '+e.sets+'×'+e.reps+'</div>'+
     '<div style="margin-top:4px"><span class="badge '+sc+'">'+((e.safety||'safe'))+'</span></div>'+
     '</div></div>'+
     (e.murl&&/\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?|$)/i.test(e.murl)?'<img class="ex-thumb" src="'+esc(e.murl)+'" alt="'+esc(e.name)+'" loading="lazy" onerror="this.style.display=\'none\'">':'')+
     (e.notes?'<div style="font-size:var(--txs);color:var(--war);margin-bottom:var(--sp2)">⚠️ '+esc(e.notes)+'</div>':'')+
-    '<div style="font-size:var(--txs);color:var(--mu);margin-bottom:var(--sp3)">🔄 Subs: '+sl+'</div>'+
+    '<div style="font-size:var(--txs);color:var(--mu);margin-bottom:var(--sp3)">🔄 Subs: '+esc(sl)+'</div>'+
     '<div class="ex-acts">'+
     '<button class="btn btn-sec btn-sm" onclick="openExForm(\''+e.id+'\')">✏️ Edit</button>'+
     '<button class="btn btn-d btn-sm" onclick="delEx(\''+e.id+'\')">🗑️</button>'+
@@ -1822,12 +1865,12 @@ function openExForm(id){
   const curSubs=e?.subs||[];
   const others=exercises.filter(x=>x.id!==id);
   if(!others.length){
-    sb.innerHTML='<div style="padding:var(--sp4);color:var(--mu);font-size:var(--txsm);text-align:center">Add more exercises first</div>';
+    sb.innerHTML='<div style="padding:var(--sp4);color:var(--mu);font-size:var(--txsm);text-align:center">'+T('add_more_first')+'</div>';
   }else{
     sb.innerHTML=others.map(x=>
       '<label class="chk-item">'+
       '<input type="checkbox" value="'+x.id+'"'+(curSubs.includes(x.id)?' checked':'')+'>'+
-      '<div><div class="chk-nm">'+esc(x.name)+'</div><div class="chk-mt">'+x.cat+'</div></div>'+
+      '<div><div class="chk-nm">'+esc(x.name)+'</div><div class="chk-mt">'+esc(x.cat)+'</div></div>'+
       '</label>'
     ).join('');
   }
@@ -1897,7 +1940,7 @@ function renderProg(){
       var isActive=p.id===activeProgramId;
       var pid=p.id;
       return '<div style="display:flex;align-items:center;gap:var(--sp3);padding:var(--sp3) var(--sp4);background:var(--sf2);border-radius:var(--r12);margin-bottom:var(--sp2);border:2px solid '+(isActive?'var(--pri)':'var(--br)')+'">'+
-        '<div style="flex:1;font-weight:700;font-family:var(--fe)">'+(isActive?'✅ ':'')+p.name+'</div>'+
+        '<div style="flex:1;font-weight:700;font-family:var(--fe)">'+(isActive?'✅ ':'')+esc(p.name)+'</div>'+
         (!isActive?'<button class="btn btn-p btn-sm" onclick="activateProgram(this.dataset.id)" data-id="'+pid+'">تفعيل</button>':'')+
         '<button class="btn btn-sec btn-sm" onclick="renameProgram(this.dataset.id)" data-id="'+pid+'">✏️</button>'+
         (programs.length>1?'<button class="btn btn-d btn-sm" onclick="deleteProgram(this.dataset.id)" data-id="'+pid+'">🗑️</button>':'')+
@@ -2020,7 +2063,7 @@ function renderAddExList(){
     const inDay=cur.includes(e.id);
     return '<div class="sub-item'+(inDay?' sel':'')+'" onclick="toggleExInDay(\''+e.id+'\',this)">'+
       '<div class="sub-ico">'+(e.icon||'💪')+'</div>'+
-      '<div style="flex:1"><div class="sub-nm">'+esc(e.name)+'</div><div class="sub-mt">'+e.cat+' · '+e.sets+'×'+e.reps+'</div></div>'+
+      '<div style="flex:1"><div class="sub-nm">'+esc(e.name)+'</div><div class="sub-mt">'+esc(e.cat)+' · '+e.sets+'×'+e.reps+'</div></div>'+
       (inDay?'<span style="color:var(--suc);font-weight:900;font-size:1.1em">✓</span>':'')+
       '</div>';
   }).join('');
@@ -2136,7 +2179,7 @@ function renderGym(){
     subExs.map(x=>'<div class="isub-item" onclick="swapGymEx(\''+x.id+'\')" style="position:relative">'+
       (pref.includes(x.id)?'<span class="sel-star">★</span>':'<span style="width:14px;display:inline-block"></span>')+
       '<div class="sub-ico">'+(x.icon||'💪')+'</div>'+
-      '<div><div class="sn">'+esc(x.name)+'</div><div class="sm">'+x.cat+'</div></div>'+
+      '<div><div class="sn">'+esc(x.name)+'</div><div class="sm">'+esc(x.cat)+'</div></div>'+
       '</div>').join(''):
     '<div style="padding:var(--sp4);color:var(--mu);font-size:var(--txsm);text-align:center">'+T('no_subs')+'</div>';
 
@@ -2152,7 +2195,7 @@ function renderGym(){
         '<div class="gex-ico">'+(ex.icon||'💪')+'</div>'+
         '<div style="flex:1">'+
           '<div class="gex-name">'+esc(ex.name)+'</div>'+
-          '<div class="gex-info">'+ex.cat+(ex.eq?' · '+ex.eq:'')+(ex.safety!=='safe'?' ⚠️':'')+'</div>'+
+          '<div class="gex-info">'+esc(ex.cat)+(ex.eq?' · '+esc(ex.eq):'')+(ex.safety!=='safe'?' ⚠️':'')+'</div>'+
           (ex.notes?'<div style="font-size:var(--txs);color:var(--war);margin-top:3px">⚠️ '+esc(ex.notes)+'</div>':'')+
         '</div>'+
         '<div style="position:relative">'+
@@ -2556,16 +2599,21 @@ function applyRO(){
 // PROGRESS
 // ════════════════════════════════════════
 let pgFilter='All';
+function setPgFilter(v){
+  const apply=nv=>{pgFilter=nv;renderProg2();};
+  if(window.SessionsModule?.setFilter)return window.SessionsModule.setFilter(v,apply);
+  apply(v);
+}
 function renderProg2(){
   const names=['All',...exercises.map(e=>e.name)];
   document.getElementById('pg-fbar').innerHTML=names.map(n=>
-    '<button class="fbtn'+(pgFilter===n?' active':'')+'" onclick="pgFilter=\''+n+'\';renderProg2()">'+n+'</button>'
+    '<button class="fbtn'+(pgFilter===n?' active':'')+'" data-f="'+esc(n)+'" onclick="setPgFilter(this.dataset.f)">'+esc(n)+'</button>'
   ).join('');
   const filtered=pgFilter==='All'?sessions:sessions.filter(s=>s.exName===pgFilter);
   const sorted=[...filtered].sort((a,b)=>new Date(b.date)-new Date(a.date));
   const kpi=document.getElementById('sess-log');
   if(!sorted.length){
-    kpi.innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M18 20V10M12 20V4M6 20v-6"/></svg><h3>No sessions yet</h3><p>Start your first gym session</p></div>';
+    kpi.innerHTML='<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M18 20V10M12 20V4M6 20v-6"/></svg><h3>'+T('no_sessions')+'</h3><p>'+T('start_first')+'</p></div>';
     return;
   }
   const week=sessions.filter(s=>new Date(s.date)>new Date(Date.now()-7*864e5)).length;
@@ -2624,7 +2672,7 @@ function reindexSetRows(){
 function openAddSess(){
   document.getElementById('sf-edit-id').value='';
   document.getElementById('m-sess-title').textContent=T('log_session');
-  document.getElementById('sf-ex').innerHTML=exercises.map(e=>'<option value="'+e.id+'">'+e.name+'</option>').join('');
+  document.getElementById('sf-ex').innerHTML=exOptions();
   document.getElementById('sf-date').value=new Date().toISOString().slice(0,10);
   document.getElementById('sf-sets-list').innerHTML='';
   [1,2,3].forEach(()=>addSessSetRow('',''));
@@ -2658,7 +2706,7 @@ function openEditSess(id){
   const s=sessions.find(x=>x.id===id);if(!s)return;
   document.getElementById('sf-edit-id').value=s.id;
   document.getElementById('m-sess-title').textContent=T('edit_session');
-  document.getElementById('sf-ex').innerHTML=exercises.map(e=>'<option value="'+e.id+'"'+(e.id===s.exId?' selected':'')+'>'+e.name+'</option>').join('');
+  document.getElementById('sf-ex').innerHTML=exOptions(s.exId);
   document.getElementById('sf-date').value=s.date?s.date.slice(0,10):'';
   document.getElementById('sf-sets-list').innerHTML='';
   const rows=s.setData&&s.setData.length?s.setData:Array.from({length:s.sets||1},()=>({reps:s.reps||10,weight:s.weight||0}));
@@ -2697,7 +2745,7 @@ function renderSubList(){
     '<div class="sub-item'+(subSelId===e.id?' sel':'')+'" onclick="selSub(\''+e.id+'\')">'+
       (pref.includes(e.id)?'<span class="sel-star">★</span>':'<span style="width:14px;display:inline-block"></span>')+
       '<div class="sub-ico">'+(e.icon||'💪')+'</div>'+
-      '<div style="flex:1"><div class="sub-nm">'+esc(e.name)+'</div><div class="sub-mt">'+e.cat+' · '+e.sets+'×'+e.reps+'</div></div>'+
+      '<div style="flex:1"><div class="sub-nm">'+esc(e.name)+'</div><div class="sub-mt">'+esc(e.cat)+' · '+e.sets+'×'+e.reps+'</div></div>'+
     '</div>'
   ).join('');
 }
@@ -2723,13 +2771,13 @@ async function btConnect(){
     btChar.addEventListener('characteristicvaluechanged',e=>{
       const hr=e.target.value.getUint8(1);
       const hw=document.getElementById('gym-hr-w');
-      if(hw){hw.classList.add('show');hw.innerHTML='❤️ '+hr+' bpm';}
+      if(hw){hw.classList.add('show');hw.textContent='❤️ '+hr+' bpm';}
       document.getElementById('topbar-bt')?.classList.add('conn');
-      document.getElementById('bt-hr').innerHTML='❤️ '+hr+' bpm';
+      document.getElementById('bt-hr').textContent='❤️ '+hr+' bpm';
       document.getElementById('bt-hr').style.display='flex';
     });
     await btChar.startNotifications();
-    document.getElementById('bt-status').innerHTML='🟢 Connected: '+btDev.name;
+    document.getElementById('bt-status').textContent='🟢 Connected: '+(btDev.name||'Device');
     toast('Connected: '+btDev.name,'s');
   }catch(e){toast('Connection failed: '+e.message,'e');}
 }
@@ -2751,19 +2799,81 @@ function exportD(fmt){
   }
   toast('Exported ✓','s');
 }
+function sanitizeImportPayload(raw){
+  const safe={};
+  if(!raw||typeof raw!=='object')return safe;
+  const isObj=v=>v&&typeof v==='object';
+  const asNum=v=>Number.isFinite(+v)?+v:0;
+  const asStr=(v,max=240)=>typeof v==='string'?v.slice(0,max):'';
+  const asLabel=(v,max=80)=>asStr(v,max).replace(/[<>"'`]/g,'').trim();
+  const asBool=v=>!!v;
+  const isSafeId=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(v);
+  const asDate=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}/.test(v)?v.slice(0,10):'';
+
+  if(Array.isArray(raw.exercises))safe.exercises=raw.exercises.filter(x=>isObj(x)&&isSafeId(x.id)).map(x=>({
+    id:x.id,name:asStr(x.name),cat:asLabel(x.cat,80),icon:asStr(x.icon,8),eq:asLabel(x.eq,80),notes:asStr(x.notes,800),
+    murl:asStr(x.murl,1200),sets:Math.max(0,Math.min(30,asNum(x.sets))),reps:Math.max(0,Math.min(200,asNum(x.reps))),
+    safety:['safe','caution','avoid'].includes(x.safety)?x.safety:'safe',
+    subs:Array.isArray(x.subs)?x.subs.filter(isSafeId).slice(0,24):[]
+  }));
+  if(Array.isArray(raw.program))safe.program=raw.program.filter(x=>isObj(x)&&isSafeId(x.id)).map(x=>({
+    id:x.id,name:asStr(x.name,120),icon:asStr(x.icon,8),rest:asBool(x.rest),
+    exercises:Array.isArray(x.exercises)?x.exercises.filter(isSafeId).slice(0,80):[]
+  }));
+  if(Array.isArray(raw.programs))safe.programs=raw.programs.filter(x=>isObj(x)&&isSafeId(x.id)&&Array.isArray(x.days)).map(x=>({
+    id:x.id,name:asStr(x.name,120),
+    days:x.days.filter(d=>isObj(d)&&isSafeId(d.id)).map(d=>({
+      id:d.id,name:asStr(d.name,120),icon:asStr(d.icon,8),rest:asBool(d.rest),
+      exercises:Array.isArray(d.exercises)?d.exercises.filter(isSafeId).slice(0,80):[]
+    }))
+  }));
+  if(Array.isArray(raw.sessions))safe.sessions=raw.sessions.filter(x=>isObj(x)&&isSafeId(x.id)).map(x=>({
+    id:x.id,date:asDate(x.date)||new Date().toISOString().slice(0,10),exId:isSafeId(x.exId)?x.exId:'',
+    exName:asStr(x.exName,120),sets:Math.max(0,Math.min(99,asNum(x.sets))),reps:Math.max(0,Math.min(999,asNum(x.reps))),
+    weight:Math.max(0,Math.min(2000,asNum(x.weight))),pain:Math.max(0,Math.min(10,asNum(x.pain))),
+    notes:asStr(x.notes,800),pr:asBool(x.pr),progId:isSafeId(x.progId)?x.progId:''
+  }));
+  if(Array.isArray(raw.weightLog))safe.weightLog=raw.weightLog.filter(x=>isObj(x)).map(x=>({
+    date:asDate(x.date),w:Math.max(0,Math.min(500,asNum(x.w)))
+  })).filter(x=>x.date);
+  if(isObj(raw.profile))safe.profile={
+    name:asStr(raw.profile.name,120),age:Math.max(0,Math.min(120,asNum(raw.profile.age))),
+    height:Math.max(0,Math.min(260,asNum(raw.profile.height))),weight:Math.max(0,Math.min(500,asNum(raw.profile.weight))),
+    goal:Math.max(0,Math.min(500,asNum(raw.profile.goal)))
+  };
+  if(isObj(raw.cfg)){
+    const c={};
+    if('dark' in raw.cfg)c.dark=asBool(raw.cfg.dark);
+    if('fs' in raw.cfg)c.fs=Math.max(12,Math.min(22,asNum(raw.cfg.fs)||16));
+    if('restAuto' in raw.cfg)c.restAuto=asBool(raw.cfg.restAuto);
+    if('restSecs' in raw.cfg)c.restSecs=Math.max(15,Math.min(300,asNum(raw.cfg.restSecs)||90));
+    if('unit' in raw.cfg)c.unit=['kg','lb'].includes(raw.cfg.unit)?raw.cfg.unit:'kg';
+    if('sound' in raw.cfg)c.sound=asBool(raw.cfg.sound);
+    if('vib' in raw.cfg)c.vib=asBool(raw.cfg.vib);
+    if('wakelock' in raw.cfg)c.wakelock=asBool(raw.cfg.wakelock);
+    if('lang' in raw.cfg)c.lang=['ar','en'].includes(raw.cfg.lang)?raw.cfg.lang:'ar';
+    safe.cfg=c;
+  }
+  if(isSafeId(raw.lastDay))safe.lastDay=raw.lastDay;
+  if(isSafeId(raw.activeProgramId))safe.activeProgramId=raw.activeProgramId;
+  if(typeof raw._exported==='string')safe._exported=raw._exported;
+  return safe;
+}
 function importD(e){
   const f=e.target.files[0];if(!f)return;
+  if((f.type||'').includes('csv')||/\.csv$/i.test(f.name||'')){toast('هذا ملف CSV وليس JSON','e');return;}
   const r=new FileReader();
   r.onload=ev=>{
     try{
-      const d=JSON.parse(ev.target.result);
+      const raw=(ev.target.result||'').toString().replace(/^\uFEFF/,'').trim();
+      const d=sanitizeImportPayload(JSON.parse(raw));
       if(d.exercises)exercises=[...exercises,...d.exercises.filter(ne=>!exercises.find(oe=>oe.id===ne.id))];
       if(d.program)program=[...program,...d.program.filter(nd=>!program.find(od=>od.id===nd.id))];
       if(d.sessions)sessions=[...sessions,...d.sessions.filter(ns=>!sessions.find(os=>os.id===ns.id))];
       if(d.lastDay)lastDay=d.lastDay;
       save('ex',exercises);save('prog',program);{const _ap=getActiveProgram();if(_ap){_ap.days=program;save('programs',programs);}}save('sess',sessions);save('lastday',lastDay);
       renderHome();toast('Imported ✓','s');
-    }catch(err){toast('Invalid file format','e');}
+    }catch(err){toast('ملف JSON غير صالح: '+(err?.message||'خطأ قراءة'), 'e');}
   };
   r.readAsText(f);
 }
@@ -2784,7 +2894,13 @@ function resetAll(){
 // UTILS
 // ════════════════════════════════════════
 function esc(s){
-  return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return(s||'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;')
+    .replace(/`/g,'&#96;');
 }
 
 
@@ -2798,6 +2914,7 @@ document.addEventListener('click', function(e){
 // INIT
 // ════════════════════════════════════════
 (function init(){
+  const repaired=normalizeLoadedState();
   document.documentElement.setAttribute('data-theme',cfg.dark?'dark':'light');
   updateThemeIcon(cfg.dark);
   document.body.style.fontSize=cfg.fs+'px';
@@ -2806,6 +2923,7 @@ document.addEventListener('click', function(e){
   renderEx();
   renderProg();
   renderProg2();
+  if(repaired){setTimeout(()=>toast('تم إصلاح بيانات غير سليمة تلقائيًا','i',3200),500);}
 
   initRipple();
 })();
@@ -2977,7 +3095,29 @@ document.querySelectorAll('.page').forEach(p=>{
 // ════════════════════════════════════════
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js')
-    .then(r=>console.log('SW:',r.scope))
+    .then(r=>{
+      console.log('SW:',r.scope);
+      let refreshing=false;
+      navigator.serviceWorker.addEventListener('controllerchange',()=>{
+        if(refreshing)return;
+        refreshing=true;
+        location.reload();
+      });
+      function askUpdate(w){
+        if(!w)return;
+        confirm2('تحديث متاح','يوجد إصدار جديد من التطبيق. هل تريد التحديث الآن؟',()=>{
+          w.postMessage({type:'SKIP_WAITING'});
+        });
+      }
+      if(r.waiting)askUpdate(r.waiting);
+      r.addEventListener('updatefound',()=>{
+        const nw=r.installing;
+        if(!nw)return;
+        nw.addEventListener('statechange',()=>{
+          if(nw.state==='installed'&&navigator.serviceWorker.controller)askUpdate(nw);
+        });
+      });
+    })
     .catch(e=>console.warn('SW err:',e));
 }
 
@@ -3022,7 +3162,7 @@ function editSess(id){
   const s=sessions.find(x=>x.id===id);
   if(!s)return;
   document.getElementById('ess-id').value=id;
-  document.getElementById('ess-ex').innerHTML=exercises.map(e=>'<option value="'+e.id+'"'+(e.id===s.exId?' selected':'')+'>'+e.name+'</option>').join('');
+  document.getElementById('ess-ex').innerHTML=exOptions(s.exId);
   document.getElementById('ess-date').value=s.date?s.date.slice(0,10):'';
   document.getElementById('ess-sets').value=s.sets||'';
   document.getElementById('ess-reps').value=s.reps||'';
@@ -3079,11 +3219,15 @@ function saveNewProgram(){
   toast('تم الحفظ ✓','s');
 }
 function activateProgram(id){
-  activeProgramId=id;
-  save('activeProg',activeProgramId);
-  syncProgram();
-  renderProg();
-  toast('تم تفعيل البرنامج ✓','s');
+  const apply=pid=>{
+    activeProgramId=pid;
+    save('activeProg',activeProgramId);
+    syncProgram();
+    renderProg();
+    toast('تم تفعيل البرنامج ✓','s');
+  };
+  if(window.ProgramsModule?.activate)return window.ProgramsModule.activate(id,apply);
+  apply(id);
 }
 function renameProgram(id){openNewProgram(id);}
 function deleteProgram(id){
@@ -3356,10 +3500,12 @@ function impPreview(e){
   const f=e.target.files[0];if(f)_readImpFile(f);
 }
 function _readImpFile(file){
+  if((file.type||'').includes('csv')||/\.csv$/i.test(file.name||'')){toast('هذا ملف CSV وليس JSON','e');_impData=null;return;}
   const r=new FileReader();
   r.onload=ev=>{
     try{
-      _impData=JSON.parse(ev.target.result);
+      const raw=(ev.target.result||'').toString().replace(/^\uFEFF/,'').trim();
+      _impData=sanitizeImportPayload(JSON.parse(raw));
       const lines=[];
       if(_impData.programs)lines.push('📋 برامج: '+_impData.programs.length+' برنامج');
       if(_impData.exercises)lines.push('🏋️ تمارين: '+_impData.exercises.length+' تمرين');
@@ -3369,10 +3515,19 @@ function _readImpFile(file){
       if(_impData._exported)lines.push('📅 تاريخ التصدير: '+_impData._exported.slice(0,10));
       const prev=document.getElementById('imp-preview');
       const body=document.getElementById('imp-preview-body');
-      if(body)body.innerHTML=lines.map(l=>'<div style="padding:3px 0;border-bottom:1px solid var(--dv)">'+l+'</div>').join('');
+      if(body){
+        body.textContent='';
+        lines.forEach(l=>{
+          const row=document.createElement('div');
+          row.style.padding='3px 0';
+          row.style.borderBottom='1px solid var(--dv)';
+          row.textContent=l;
+          body.appendChild(row);
+        });
+      }
       if(prev)prev.style.display='';
       document.getElementById('drop-zone').style.display='none';
-    }catch(err){toast('ملف غير صالح — تأكد أنه JSON صحيح','e');_impData=null;}
+    }catch(err){toast('ملف غير صالح — JSON: '+(err?.message||'تعذر القراءة'),'e');_impData=null;}
   };
   r.readAsText(file);
 }
@@ -3384,26 +3539,27 @@ function impCancel(){
 }
 function impConfirm(){
   if(!_impData){toast('لا يوجد ملف محدد','e');return;}
+  const data=sanitizeImportPayload(_impData);
   const mode=document.getElementById('imp-mode')?.value||'merge';
   if(mode==='replace'){
-    if(_impData.programs){programs=_impData.programs;activeProgramId=_impData.activeProgramId||'';save('programs',programs);save('activeProg',activeProgramId);syncProgram();}
-    if(_impData.exercises){exercises=_impData.exercises;save('ex',exercises);}
-    if(_impData.sessions){sessions=_impData.sessions;save('sess',sessions);}
-    if(_impData.profile){profile=_impData.profile;save('profile',profile);}
-    if(_impData.weightLog){weightLog=_impData.weightLog;save('weightLog',weightLog);}
-    if(_impData.cfg){cfg=Object.assign(cfg,_impData.cfg);save('cfg',cfg);}
+    if(data.programs){programs=data.programs;activeProgramId=data.activeProgramId||'';save('programs',programs);save('activeProg',activeProgramId);syncProgram();}
+    if(data.exercises){exercises=data.exercises;save('ex',exercises);}
+    if(data.sessions){sessions=data.sessions;save('sess',sessions);}
+    if(data.profile){profile=data.profile;save('profile',profile);}
+    if(data.weightLog){weightLog=data.weightLog;save('weightLog',weightLog);}
+    if(data.cfg){cfg=Object.assign(cfg,data.cfg);save('cfg',cfg);}
   }else if(mode==='prog-only'){
-    if(_impData.programs){
-      _impData.programs.forEach(np=>{if(!programs.find(p=>p.id===np.id))programs.push(np);});
+    if(data.programs){
+      data.programs.forEach(np=>{if(!programs.find(p=>p.id===np.id))programs.push(np);});
       save('programs',programs);
     }
   }else{// merge
-    if(_impData.programs)_impData.programs.forEach(np=>{if(!programs.find(p=>p.id===np.id))programs.push(np);});
-    if(_impData.exercises)_impData.exercises.forEach(ne=>{if(!exercises.find(e=>e.id===ne.id))exercises.push(ne);});
-    if(_impData.sessions)_impData.sessions.forEach(ns=>{if(!sessions.find(s=>s.id===ns.id))sessions.push(ns);});
-    if(_impData.weightLog)_impData.weightLog.forEach(nw=>{if(!weightLog.find(w=>w.date===nw.date))weightLog.push(nw);});
+    if(data.programs)data.programs.forEach(np=>{if(!programs.find(p=>p.id===np.id))programs.push(np);});
+    if(data.exercises)data.exercises.forEach(ne=>{if(!exercises.find(e=>e.id===ne.id))exercises.push(ne);});
+    if(data.sessions)data.sessions.forEach(ns=>{if(!sessions.find(s=>s.id===ns.id))sessions.push(ns);});
+    if(data.weightLog)data.weightLog.forEach(nw=>{if(!weightLog.find(w=>w.date===nw.date))weightLog.push(nw);});
     save('programs',programs);save('ex',exercises);save('sess',sessions);save('weightLog',weightLog);
-    if(_impData.profile&&!profile.name){profile=_impData.profile;save('profile',profile);}
+    if(data.profile&&!profile.name){profile=data.profile;save('profile',profile);}
     syncProgram();
   }
   impCancel();renderEx();renderProg();initSettings();
@@ -3503,7 +3659,7 @@ function renderPRs(){
     '<div class="pr-card'+(i<3?' is-pr':'')+'">'
     +'<div class="pr-rank" style="background:'+(i===0?'rgba(232,175,52,.25)':i===1?'rgba(200,200,200,.2)':i===2?'rgba(180,120,60,.2)':'var(--sf3)')+'">'+(medals[i]||'<span style="font-size:10px;color:var(--mu)">'+(i+1)+'</span>')+'</div>'
     +'<div style="flex:1;min-width:0"><div class="pr-nm">'+esc(p.nm)+'</div>'
-    +'<div style="font-size:var(--txs);color:var(--mu)">'+p.date+' · '+p.r+' reps × '+p.st+' sets</div></div>'
+    +'<div style="font-size:var(--txs);color:var(--mu)">'+esc(p.date)+' · '+p.r+' reps × '+p.st+' sets</div></div>'
     +'<div style="text-align:left;flex-shrink:0"><div class="pr-val">'+p.w+'<span style="font-size:var(--txs);font-weight:400;color:var(--mu)"> kg</span></div></div>'
     +'</div>'
   ).join('');
