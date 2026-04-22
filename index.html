@@ -1034,6 +1034,7 @@ input:focus,select:focus,textarea:focus{
 <button class="btn btn-d btn-sm" onclick="delProg()">🗑️ حذف التقدم</button>
 <button class="btn btn-d btn-sm" onclick="resetAll()">⚠️ إعادة ضبط</button>
 </div>
+<button class="btn btn-sec btn-full" onclick="repairDataNow()" style="margin-top:var(--sp3)">🛠️ إصلاح البيانات الآن</button>
 </div>
 <!-- IMPORT PANEL -->
 <div id="ep-import" style="display:none">
@@ -1489,6 +1490,10 @@ let weightLog=load('weightLog',[]);
 let lastDay=load('lastday','');
 
 function normalizeLoadedState(){
+ codex/review-project-6jqtp8
+  const before=JSON.stringify({exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId});
+
+ main
   const safe=sanitizeImportPayload({
     exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId
   });
@@ -1503,6 +1508,17 @@ function normalizeLoadedState(){
   activeProgramId=safe.activeProgramId||activeProgramId||'';
   save('ex',exercises);save('prog',program);save('programs',programs);save('sess',sessions);
   save('weightLog',weightLog);save('profile',profile);save('cfg',cfg);save('lastday',lastDay);save('activeProg',activeProgramId);
+ codex/review-project-6jqtp8
+  const after=JSON.stringify({exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId});
+  return before!==after;
+}
+function repairDataNow(){
+  const changed=normalizeLoadedState();
+  syncProgram();
+  renderHome();renderEx();renderProg();renderProg2();initSettings();
+  toast(changed?'تم إصلاح البيانات وحفظها ✓':'البيانات سليمة ✓',changed?'i':'s');
+=======
+  main
 }
 
 // ── DEFAULT EXERCISES
@@ -2851,17 +2867,23 @@ function sanitizeImportPayload(raw){
 }
 function importD(e){
   const f=e.target.files[0];if(!f)return;
+  if((f.type||'').includes('csv')||/\.csv$/i.test(f.name||'')){toast('هذا ملف CSV وليس JSON','e');return;}
   const r=new FileReader();
   r.onload=ev=>{
     try{
+  codex/review-project-6jqtp8
+      const raw=(ev.target.result||'').toString().replace(/^\uFEFF/,'').trim();
+      const d=sanitizeImportPayload(JSON.parse(raw));
+
       const d=sanitizeImportPayload(JSON.parse(ev.target.result));
+  main
       if(d.exercises)exercises=[...exercises,...d.exercises.filter(ne=>!exercises.find(oe=>oe.id===ne.id))];
       if(d.program)program=[...program,...d.program.filter(nd=>!program.find(od=>od.id===nd.id))];
       if(d.sessions)sessions=[...sessions,...d.sessions.filter(ns=>!sessions.find(os=>os.id===ns.id))];
       if(d.lastDay)lastDay=d.lastDay;
       save('ex',exercises);save('prog',program);{const _ap=getActiveProgram();if(_ap){_ap.days=program;save('programs',programs);}}save('sess',sessions);save('lastday',lastDay);
       renderHome();toast('Imported ✓','s');
-    }catch(err){toast('Invalid file format','e');}
+    }catch(err){toast('ملف JSON غير صالح: '+(err?.message||'خطأ قراءة'), 'e');}
   };
   r.readAsText(f);
 }
@@ -2902,7 +2924,11 @@ document.addEventListener('click', function(e){
 // INIT
 // ════════════════════════════════════════
 (function init(){
+  codex/review-project-6jqtp8
+  const repaired=normalizeLoadedState();
+ 
   normalizeLoadedState();
+  main
   document.documentElement.setAttribute('data-theme',cfg.dark?'dark':'light');
   updateThemeIcon(cfg.dark);
   document.body.style.fontSize=cfg.fs+'px';
@@ -2911,6 +2937,7 @@ document.addEventListener('click', function(e){
   renderEx();
   renderProg();
   renderProg2();
+  if(repaired){setTimeout(()=>toast('تم إصلاح بيانات غير سليمة تلقائيًا','i',3200),500);}
 
   initRipple();
 })();
@@ -3487,10 +3514,16 @@ function impPreview(e){
   const f=e.target.files[0];if(f)_readImpFile(f);
 }
 function _readImpFile(file){
+  if((file.type||'').includes('csv')||/\.csv$/i.test(file.name||'')){toast('هذا ملف CSV وليس JSON','e');_impData=null;return;}
   const r=new FileReader();
   r.onload=ev=>{
     try{
+  codex/review-project-6jqtp8
+      const raw=(ev.target.result||'').toString().replace(/^\uFEFF/,'').trim();
+      _impData=sanitizeImportPayload(JSON.parse(raw));
+
       _impData=sanitizeImportPayload(JSON.parse(ev.target.result));
+  main
       const lines=[];
       if(_impData.programs)lines.push('📋 برامج: '+_impData.programs.length+' برنامج');
       if(_impData.exercises)lines.push('🏋️ تمارين: '+_impData.exercises.length+' تمرين');
@@ -3512,7 +3545,7 @@ function _readImpFile(file){
       }
       if(prev)prev.style.display='';
       document.getElementById('drop-zone').style.display='none';
-    }catch(err){toast('ملف غير صالح — تأكد أنه JSON صحيح','e');_impData=null;}
+    }catch(err){toast('ملف غير صالح — JSON: '+(err?.message||'تعذر القراءة'),'e');_impData=null;}
   };
   r.readAsText(file);
 }
