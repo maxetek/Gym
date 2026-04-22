@@ -1490,7 +1490,10 @@ let weightLog=load('weightLog',[]);
 let lastDay=load('lastday','');
 
 function normalizeLoadedState(){
+ codex/review-project-6jqtp8
   const before=JSON.stringify({exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId});
+
+ main
   const safe=sanitizeImportPayload({
     exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId
   });
@@ -1505,6 +1508,7 @@ function normalizeLoadedState(){
   activeProgramId=safe.activeProgramId||activeProgramId||'';
   save('ex',exercises);save('prog',program);save('programs',programs);save('sess',sessions);
   save('weightLog',weightLog);save('profile',profile);save('cfg',cfg);save('lastday',lastDay);save('activeProg',activeProgramId);
+ codex/review-project-6jqtp8
   const after=JSON.stringify({exercises,program,programs,sessions,weightLog,profile,cfg,lastDay,activeProgramId});
   return before!==after;
 }
@@ -1513,6 +1517,8 @@ function repairDataNow(){
   syncProgram();
   renderHome();renderEx();renderProg();renderProg2();initSettings();
   toast(changed?'تم إصلاح البيانات وحفظها ✓':'البيانات سليمة ✓',changed?'i':'s');
+=======
+  main
 }
 
 // ── DEFAULT EXERCISES
@@ -2865,8 +2871,12 @@ function importD(e){
   const r=new FileReader();
   r.onload=ev=>{
     try{
+  codex/review-project-6jqtp8
       const raw=(ev.target.result||'').toString().replace(/^\uFEFF/,'').trim();
       const d=sanitizeImportPayload(JSON.parse(raw));
+
+      const d=sanitizeImportPayload(JSON.parse(ev.target.result));
+  main
       if(d.exercises)exercises=[...exercises,...d.exercises.filter(ne=>!exercises.find(oe=>oe.id===ne.id))];
       if(d.program)program=[...program,...d.program.filter(nd=>!program.find(od=>od.id===nd.id))];
       if(d.sessions)sessions=[...sessions,...d.sessions.filter(ns=>!sessions.find(os=>os.id===ns.id))];
@@ -2914,7 +2924,11 @@ document.addEventListener('click', function(e){
 // INIT
 // ════════════════════════════════════════
 (function init(){
+  codex/review-project-6jqtp8
   const repaired=normalizeLoadedState();
+ 
+  normalizeLoadedState();
+  main
   document.documentElement.setAttribute('data-theme',cfg.dark?'dark':'light');
   updateThemeIcon(cfg.dark);
   document.body.style.fontSize=cfg.fs+'px';
@@ -3504,8 +3518,12 @@ function _readImpFile(file){
   const r=new FileReader();
   r.onload=ev=>{
     try{
+  codex/review-project-6jqtp8
       const raw=(ev.target.result||'').toString().replace(/^\uFEFF/,'').trim();
       _impData=sanitizeImportPayload(JSON.parse(raw));
+
+      _impData=sanitizeImportPayload(JSON.parse(ev.target.result));
+  main
       const lines=[];
       if(_impData.programs)lines.push('📋 برامج: '+_impData.programs.length+' برنامج');
       if(_impData.exercises)lines.push('🏋️ تمارين: '+_impData.exercises.length+' تمرين');
